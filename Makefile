@@ -1,7 +1,9 @@
 IMAGE_NAME = alpinerustimage
+VOLUME_NAME = alpinerustvolume
 CONTAINER_NAME = alpinerust
-CHECKSUM_FILE = .checksums
+CHECKSUM_FILE = .checksum
 FILES_CHANGED_FLAG = .files_changed
+ISO_FILE = kfs.iso
 
 NO_OUTPUT = > /dev/null 2>&1
 CHECKMARK = $(GREEN)✓$(WHITE)
@@ -10,52 +12,69 @@ SRC_FILES = Cargo.toml i386-unknown-none.json linker.ld Makefile_docker
 
 SRC_DIRS = src isofiles .cargo
 
-YELLOW = \033[0;33m
-GREEN = \033[0;32m
+YELLOW = \033[1;33m
+GREEN = \033[1;32m
+RED = \033[1;31m
 WHITE = \033[0;37m
 
-all: docker-build docker-create docker-start check-checksums
+all: docker-build docker-create docker-start check-checksums 
+
+docker-volume:
+	@if [ -z "$$(docker volume ls -q -f name=$(VOLUME_NAME))" ]; then \
+		echo "$(YELLOW)Creating Docker volume $(VOLUME_NAME)...$(WHITE)"; \
+		docker volume create $(VOLUME_NAME) > /dev/null 2>&1; \
+		echo "$(GREEN)Docker volume $(VOLUME_NAME) created successfully.$(WHITE)"; \
+	else \
+		echo "$(GREEN)Docker volume $(VOLUME_NAME) already exists.$(WHITE)"; \
+	fi
 
 docker-build:
 	@if [ -z "$$(docker images -q $(IMAGE_NAME))" ]; then \
-		echo "Building Docker image $(IMAGE_NAME)..."; \
-		docker build -t $(IMAGE_NAME) .; \
+		echo "$(YELLOW)Building Docker image $(IMAGE_NAME)...$(WHITE)"; \
+		docker build -t $(IMAGE_NAME) . > /dev/null 2>&1; \
+		echo "$(GREEN)Docker image $(IMAGE_NAME) built successfully.$(WHITE)"; \
 	else \
-		echo "$(CHECKMARK) Docker image $(IMAGE_NAME) already exists."; \
+		echo "$(GREEN)Docker image $(IMAGE_NAME) already exists.$(WHITE)"; \
 	fi
 
-docker-create:
+docker-create: docker-volume
 	@if [ -z "$$(docker ps -aq -f name=^$(CONTAINER_NAME)$$)" ]; then \
-		echo "Creating Docker container $(CONTAINER_NAME)..."; \
-		docker create --name $(CONTAINER_NAME) $(IMAGE_NAME); \
+		echo "$(YELLOW)Creating Docker container $(CONTAINER_NAME)...$(WHITE)"; \
+		docker create --name $(CONTAINER_NAME) -v $(VOLUME_NAME):/kfs $(IMAGE_NAME) > /dev/null 2>&1; \
+		echo "$(GREEN)Docker container $(CONTAINER_NAME) created successfully.$(WHITE)"; \
 	else \
-		echo "$(CHECKMARK) Docker container $(CONTAINER_NAME) already exists."; \
+		echo "$(GREEN)Docker container $(CONTAINER_NAME) already exists.$(WHITE)"; \
 	fi
 
 docker-start:
 	@if [ -z "$$(docker ps -q -f name=^$(CONTAINER_NAME)$$ -f status=running)" ]; then \
-		echo "Starting Docker container $(CONTAINER_NAME)..."; \
-		docker start $(CONTAINER_NAME); \
+		echo "$(YELLOW)Starting Docker container $(CONTAINER_NAME)...$(WHITE)"; \
+		docker start $(CONTAINER_NAME) > /dev/null 2>&1; \
+		echo "$(GREEN)Docker container $(CONTAINER_NAME) started successfully.$(WHITE)"; \
 	else \
-		echo "$(CHECKMARK) Docker container $(CONTAINER_NAME) is already running."; \
+		echo "$(GREEN)Docker container $(CONTAINER_NAME) is already running.$(WHITE)"; \
 	fi
 
-transfer-and-build: check-checksums
-	@docker cp .cargo $(CONTAINER_NAME):/kfs $(NO_OUTPUT)
-	@docker cp isofiles $(CONTAINER_NAME):/kfs $(NO_OUTPUT)
-	@docker cp src $(CONTAINER_NAME):/kfs $(NO_OUTPUT)
-	@docker cp Cargo.toml $(CONTAINER_NAME):/kfs $(NO_OUTPUT)
-	@docker cp i386-unknown-none.json $(CONTAINER_NAME):/kfs $(NO_OUTPUT)
-	@docker cp linker.ld $(CONTAINER_NAME):/kfs $(NO_OUTPUT)
-	@docker cp Makefile_docker $(CONTAINER_NAME):/kfs/Makefile $(NO_OUTPUT)
+transfer-and-build:
+	$(eval MOUNTPOINT=$(shell docker volume inspect --format '{{ .Mountpoint }}' $(VOLUME_NAME)))
+	@cp -r .cargo $(MOUNTPOINT)/
+	@cp -r isofiles $(MOUNTPOINT)/
+	@cp -r src $(MOUNTPOINT)/
+	@cp Cargo.toml $(MOUNTPOINT)/
+	@cp i386-unknown-none.json $(MOUNTPOINT)/
+	@cp linker.ld $(MOUNTPOINT)/
+	@cp Makefile_docker $(MOUNTPOINT)/Makefile
 	@echo "$(YELLOW)\n--- Building KFS ---\n$(WHITE)"
-	@docker exec -t $(CONTAINER_NAME) make
+	@if ! docker exec -t $(CONTAINER_NAME) make; then \
+		echo "$(RED)\n--- Error in building KFS ---\n$(WHITE)"; \
+		rm -f $(CHECKSUM_FILE); \
+		exit 1; \
+	fi
 	@echo "$(GREEN)\n--- Build finished ---\n$(WHITE)"
-	@docker cp $(CONTAINER_NAME):/kfs/kfs.iso kfs.iso $(NO_OUTPUT)
-	@$(MAKE) update-checksums
+	@cp $(MOUNTPOINT)/$(ISO_FILE) $(ISO_FILE)
 
 check-checksums:
-	@echo "Checking for file changes..."
+	@echo "\nChecking for file changes..."
 	@{ \
 	find $(SRC_DIRS) -type f -exec md5sum {} +; \
 	md5sum $(SRC_FILES); \
@@ -69,12 +88,30 @@ check-checksums:
 		rm $(CHECKSUM_FILE).new; \
 	fi
 
-run:
-	@if [ -f kfs.iso ]; then \
-		qemu-system-i386 -boot order=c kfs.iso; \
+run: all
+	@if [ -f $(ISO_FILE) ]; then \
+		qemu-system-i386 -drive file=kfs.iso,format=raw,index=0,media=disk -m 32 -serial file:output.log -serial stdio -display curses; \
 	else \
-		echo "No kfs.iso found, please run 'make' first."; \
+		echo "No $(ISO_FILE) found, please run 'make' first."; \
 	fi
+
+debug: all
+	@if [ -f $(ISO_FILE) ]; then \
+		qemu-system-i386 -drive file=kfs.iso,format=raw,index=0,media=disk -s -S -m 32 -serial file:output.log -serial stdio -display curses; \
+	else \
+		echo "No $(ISO_FILE) found, please run 'make' first."; \
+	fi
+
+doc: all
+	$(eval MOUNTPOINT=$(shell docker volume inspect --format '{{ .Mountpoint }}' $(VOLUME_NAME)))
+	@docker exec -t $(CONTAINER_NAME) cargo doc --document-private-items
+	@echo "$(YELLOW)\n--- Copying documentation from Docker volume ---\n$(WHITE)"
+	@cp $(MOUNTPOINT)/target/i386-unknown-none/doc doc -r
+	@echo "$(GREEN)Documentation copied to doc$(WHITE)"
+	@open doc/kfs/index.html
+
+cargo-clean:
+	@docker exec -t $(CONTAINER_NAME) cargo clean
 
 clean:
 	@if [ ! -z "$$(docker ps -aq -f name=^$(CONTAINER_NAME)$$)" ]; then \
@@ -84,8 +121,19 @@ clean:
 	else \
 		echo "No such container: $(CONTAINER_NAME)"; \
 	fi
+	@if [ ! -z "$$(docker volume ls -q -f name=^$(VOLUME_NAME)$$)" ]; then \
+		echo "Deleting Docker volume $(VOLUME_NAME)..."; \
+		docker volume rm $(VOLUME_NAME); \
+	else \
+		echo "No such volume: $(VOLUME_NAME)"; \
+	fi
 	rm -f $(CHECKSUM_FILE)
 	rm -f $(FILES_CHANGED_FLAG)
+	rm -f $(ISO_FILE)
+	rm -f output.log
+	rm -f Cargo.lock
+	rm -rf doc
+	rm -rf target
 
 fclean: clean
 	@if [ ! -z "$$(docker images -q $(IMAGE_NAME))" ]; then \
@@ -94,4 +142,4 @@ fclean: clean
 		echo "No such image: $(IMAGE_NAME)"; \
 	fi
 
-.PHONY: all docker-build docker-create docker-start transfer-and-build check-checksums update-checksums clean fclean
+.PHONY: all docker-build docker-create docker-start transfer-and-build check-checksums doc clean fclean

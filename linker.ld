@@ -1,3 +1,5 @@
+HIGHER_HALF_OFFSET = 0xC0000000;
+
 ENTRY(start)
 
 SECTIONS {
@@ -11,30 +13,35 @@ SECTIONS {
 		. = ALIGN(4);
 	}
 
-	. = 1M;
+    /* Place the Multiboot header at the very start of the kernel */
+    .boot 0x1000 : {
+		_multi_boot_header = .;
+        KEEP(*(.multiboot_header))
+    }
 
-	.multiboot_header ALIGN(8) : {
-		KEEP(*(.multiboot_header))
-	}
+    /* Define the start of the kernel in the higher half */
+    . = HIGHER_HALF_OFFSET + 1M;
+    _kernel_start = .;
 
-	.text ALIGN(0x1000) :
-	{
-		*(.text .text.*)
-	}
+    /* Place the text section after the kernel start */
+    .text ALIGN(4K) : AT(ADDR(.text) - HIGHER_HALF_OFFSET) {
+        *(.text .text.*)
+    }
 
-	.rodata ALIGN(16) :
-	{
-		*(.rodata .rodata.*)
-	}
+    /* Place other sections */
+    .rodata ALIGN(4K) : AT(ADDR(.rodata) - HIGHER_HALF_OFFSET) {
+        *(.rodata .rodata.*)
+    }
 
-	.data ALIGN(16) :
-	{
-		*(.data .data.*)
-	}
+    .data ALIGN(4K) : AT(ADDR(.data) - HIGHER_HALF_OFFSET) {
+        *(.data .data.*)
+    }
 
-	.bss ALIGN(16) :
-	{
-		*(.bss .bss.*)
-		*(COMMON)
-	}
+    .bss ALIGN(4K) : AT(ADDR(.bss) - HIGHER_HALF_OFFSET) {
+        *(.bss .bss.*)
+        *(COMMON)
+		*(.bootstrap_stack)
+    }
+	. = ALIGN(4K);
+    _kernel_end = .;
 }

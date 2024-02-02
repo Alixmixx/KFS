@@ -1,18 +1,32 @@
+//! Module for managing the command-line prompt in a shell-like interface.
+//!
+//! This module provides the functionality to handle input and editing of text
+//! at a command prompt. It manages the insertion, deletion, and navigation of
+//! characters within the prompt, as well as executing commands upon receiving
+//! an enter key press.
+
+use crate::shell::builtins::readline;
+use crate::vga::video_graphics_array::{VGA_COLUMNS, WRITER};
 use lazy_static::lazy_static;
 use spin::Mutex;
-use crate::video_graphics_array::{ WRITER, VGA_COLUMNS, VGA_LAST_LINE };
-use crate::shell::readline;
 
 pub static PROMPT_STRING: &str = "$> ";
 pub static PROMPT_LENGTH: usize = PROMPT_STRING.len();
 
 lazy_static! {
+	/// Static Mutex-protected global instance of the prompt.
+	///
+	/// This instance represents the current state of the command-line prompt
 	pub static ref PROMPT: Mutex<Prompt> = Mutex::new(Prompt {
 		buffer: [0; VGA_COLUMNS],
 		length: 0,
 	});
 }
 
+/// Represents the command-line prompt.
+///
+/// This struct maintains the state of the prompt, including the buffer
+/// for the current input line and the length of the input.
 pub struct Prompt {
 	buffer: [u8; VGA_COLUMNS],
 	pub length: usize,
@@ -28,6 +42,10 @@ impl Prompt {
 	pub fn insert_char(&mut self, c: u8, insert: bool) {
 		if c == b'\n' {
 			println!();
+			if self.length < PROMPT_LENGTH {
+				self.init();
+				return;
+			}
 			readline(core::str::from_utf8(&self.buffer[PROMPT_LENGTH..self.length]).unwrap());
 			self.init();
 			return;
@@ -76,16 +94,10 @@ impl Prompt {
 		WRITER.lock().update_line(buffer_as_str);
 	}
 
-	pub fn init(&mut self) {
+	fn init(&mut self) {
 		self.clear();
 		WRITER.lock().column_position = 0;
 		self.insert_string(PROMPT_STRING);
-	}
-}
-
-pub fn right_arrow() {
-	if WRITER.lock().column_position < PROMPT.lock().length {
-		WRITER.lock().move_cursor(1);
 	}
 }
 
@@ -95,9 +107,36 @@ pub fn left_arrow() {
 	}
 }
 
+pub fn right_arrow() {
+	if WRITER.lock().column_position < PROMPT.lock().length {
+		WRITER.lock().move_cursor(1);
+	}
+}
+
 pub fn backspace() {
 	if WRITER.lock().column_position > PROMPT_LENGTH {
 		PROMPT.lock().remove_char();
+	}
+}
+
+pub fn delete() {
+	if WRITER.lock().column_position < PROMPT.lock().length {
+		WRITER.lock().move_cursor(1);
+		PROMPT.lock().remove_char();
+	}
+}
+
+pub fn home() {
+	let diff: i8 = (WRITER.lock().column_position - PROMPT_LENGTH) as i8;
+	if diff > 0 {
+		WRITER.lock().move_cursor(-diff);
+	}
+}
+
+pub fn end() {
+	let diff: i8 = (PROMPT.lock().length - WRITER.lock().column_position) as i8;
+	if diff > 0 {
+		WRITER.lock().move_cursor(diff);
 	}
 }
 
@@ -107,17 +146,11 @@ pub fn tab() {
 	}
 }
 
-pub fn end() {
-	WRITER.lock().update_cursor(VGA_LAST_LINE, PROMPT.lock().length);
+pub fn enter() {
+	PROMPT.lock().insert_char(b'\n', false);
 }
 
-pub fn home() {
-	WRITER.lock().update_cursor(VGA_LAST_LINE, PROMPT_LENGTH);
-}
-
-pub fn delete() {
-	if WRITER.lock().column_position < PROMPT.lock().length {
-		WRITER.lock().move_cursor(1);
-		PROMPT.lock().remove_char();
-	}
+pub fn init() {
+	print!("");
+	PROMPT.lock().init();
 }
