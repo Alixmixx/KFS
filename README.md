@@ -1,5 +1,4 @@
-# KFS Kernel Project README
-
+# KFS Kernel Project
 ## Overview
 
 This project, KFS (Kernel From Scratch), is a 32-bit operating system kernel written in Rust, developed as part of a school project. It involves creating a minimalistic kernel that can boot using GRUB, handle basic I/O operations, manage memory, and support interrupts and a Global Descriptor Table (GDT).
@@ -62,6 +61,9 @@ This project, KFS (Kernel From Scratch), is a 32-bit operating system kernel wri
 - **KFS-3**: Advanced memory management with paging and kernel panic handling.
 - **KFS-4**: IDT setup and basic interrupt handling.
 
----
-
 **Note**: This README provides a general guideline for building and running the KFS kernel. Adjustments may be necessary depending on the specific setup and requirements of your environment.
+
+---
+## Contributions
+
+This project was made in collaboration with Lorenzo Edoardo Francesco. I'd like to extend my heartfelt thanks to him for his invaluable contributions. His insights, expertise, and dedication were pivotal in the success of this project. His ability to tackle complex problems with innovative solutions has been a source of inspiration throughout this journey. Working alongside Lorenzo has been an enriching experience, and I am profoundly grateful for the knowledge and perspectives he shared. https://github.com/lorenzoedoardofrancesco
